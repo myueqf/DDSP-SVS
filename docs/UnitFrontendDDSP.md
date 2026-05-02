@@ -55,7 +55,7 @@ frontend model without deeply rewriting DiffSinger.
 
 - `scripts/predict_binary_units.py`
   - Runs a trained unit acoustic checkpoint on one binary item.
-  - Saves a `.mel.pt`-compatible payload for analysis or DDSP-SVC vocoding.
+  - Saves a `.units.pt`-compatible payload for analysis or DDSP-SVC vocoding.
 
 ## Current Validation Result
 
@@ -88,7 +88,7 @@ python scripts/infer.py acoustic samples/123.ds \
   --title step10k_aux \
   --depth 0
 
-python scripts/vocode_units.py outputs/step10k_aux.mel.pt \
+python scripts/vocode_units.py outputs/step10k_aux.units.pt \
   --ddsp-svc ../DDSP-SVC \
   --model /root/DiffSinger/checkpoints/ddspmodel/model_1600.pt \
   --out outputs/step10k_aux.wav \
@@ -202,7 +202,7 @@ python scripts/infer.py acoustic samples/123.ds \
 ```
 
 `scripts/infer.py acoustic` intentionally requires `--mel` for unit frontends.
-The saved `.mel.pt` file contains units, not real mel-spectrograms, and should
+The saved `.units.pt` file contains units, not real mel-spectrograms, and should
 be rendered with `scripts/vocode_units.py`.
 
 If diffusion / reflow is tested again later, pass `--depth` explicitly. This

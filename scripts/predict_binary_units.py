@@ -11,7 +11,7 @@ sys.path.insert(0, str(root_dir))
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Run a unit acoustic checkpoint on one binary dataset item and save .mel.pt-compatible output.'
+        description='Run a unit acoustic checkpoint on one binary dataset item and save .units.pt-compatible output.'
     )
     parser.add_argument('--exp', type=str, required=True)
     parser.add_argument('--config', type=str, default='', help='Config file used by the experiment')

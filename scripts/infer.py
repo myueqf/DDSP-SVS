@@ -110,7 +110,7 @@ def main():
 )
 @click.option(
     '--mel', is_flag=True,
-    help='Save intermediate mel format instead of waveform'
+    help='Save intermediate acoustic tensor instead of waveform; unit frontends save .units.pt'
 )
 def acoustic(
         proj: pathlib.Path,

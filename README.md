@@ -111,7 +111,7 @@ python scripts/infer.py acoustic samples/example.ds \
   --out outputs \
   --title example
 
-python scripts/vocode_units.py outputs/example.mel.pt \
+python scripts/vocode_units.py outputs/example.units.pt \
   --ddsp-svc ../DDSP-SVC \
   --model checkpoints/ddspmodel/model_1600.pt \
   --out outputs/example.wav \

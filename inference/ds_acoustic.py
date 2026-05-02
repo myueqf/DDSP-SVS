@@ -226,7 +226,12 @@ class DiffSingerAcousticInfer(BaseSVSInfer):
         batches = [self.preprocess_input(param, idx=i) for i, param in enumerate(params)]
 
         out_dir.mkdir(parents=True, exist_ok=True)
-        suffix = '.wav' if not save_mel else '.mel.pt'
+        if not save_mel:
+            suffix = '.wav'
+        elif hparams.get('task_cls') == 'training.unit_acoustic_task.UnitAcousticTask':
+            suffix = '.units.pt'
+        else:
+            suffix = '.mel.pt'
         for i in range(num_runs):
             if save_mel:
                 result = []
@@ -267,7 +272,8 @@ class DiffSingerAcousticInfer(BaseSVSInfer):
                 filename = title + suffix
             save_path = out_dir / filename
             if save_mel:
-                print(f'| save mel: {save_path}')
+                saved_kind = 'units' if suffix == '.units.pt' else 'mel'
+                print(f'| save {saved_kind}: {save_path}')
                 torch.save(result, save_path)
             else:
                 print(f'| save audio: {save_path}')

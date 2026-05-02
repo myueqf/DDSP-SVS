@@ -14,7 +14,7 @@ from utils.indexed_datasets import IndexedDataset
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Compare predicted unit frontend output against binary gt units.')
-    parser.add_argument('--pred', type=pathlib.Path, required=True, help='.mel.pt saved by scripts/infer.py acoustic --mel')
+    parser.add_argument('--pred', type=pathlib.Path, required=True, help='.units.pt saved by scripts/infer.py acoustic --mel')
     parser.add_argument('--binary-data-dir', type=pathlib.Path, required=True)
     parser.add_argument('--prefix', type=str, default='valid', choices=['train', 'valid'])
     parser.add_argument('--index', type=int, default=0)

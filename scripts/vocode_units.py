@@ -14,7 +14,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description='Run a DDSP-SVC backend from DiffSinger unit frontend output.'
     )
-    parser.add_argument('input', type=pathlib.Path, help='Path to .mel.pt saved by scripts/infer.py acoustic --mel')
+    parser.add_argument('input', type=pathlib.Path, help='Path to .units.pt saved by scripts/infer.py acoustic --mel')
     parser.add_argument('--ddsp-svc', type=pathlib.Path, default=pathlib.Path('../DDSP-SVC'),
                         help='Path to DDSP-SVC repository')
     parser.add_argument('--model', type=pathlib.Path, required=True,
