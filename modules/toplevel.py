@@ -94,6 +94,8 @@ class DiffSingerAcoustic(CategorizedModule, ParameterAdaptorModule):
             if self.use_shallow_diffusion:
                 aux_mel_pred = self.aux_decoder(condition, infer=True)
                 aux_mel_pred *= ((mel2ph > 0).float()[:, :, None])
+                if hparams.get('unit_frontend_infer_aux', False):
+                    return ShallowDiffusionOutput(aux_out=aux_mel_pred, diff_out=aux_mel_pred)
                 if gt_mel is not None and self.shallow_args['val_gt_start']:
                     src_mel = gt_mel
                 else:

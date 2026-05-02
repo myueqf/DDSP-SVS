@@ -1,9 +1,16 @@
-# It is recommended to install PyTorch manually.
-# PyTorch >= 2.0 is recommended, but 1.12 and 1.13 is compatible.
+# It is recommended to install PyTorch and torchaudio manually.
+# PyTorch >= 2.0 is recommended. Some legacy workflows may still work on 1.13,
+# but recent transformers versions may warn or disable PyTorch support there.
 # See instructions at https://pytorch.org/get-started/locally/
+#
+# fairseq==0.12.2 is used for legacy ContentVec checkpoints and should be
+# installed with pip==24.0:
+#   python -m pip install pip==24.0
 
 click
 einops>=0.7.0
+fairseq==0.12.2
+gin-config
 h5py
 librosa<0.10.0
 lightning~=2.3.0
@@ -16,8 +23,12 @@ praat-parselmouth==0.4.3
 pyworld==0.3.4
 PyYAML
 resampy
+scikit-learn
 scipy>=1.10.0
+soundfile
 tensorboard
 tensorboardX
+torchcrepe
 torchmetrics
+transformers
 tqdm

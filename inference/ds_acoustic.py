@@ -51,9 +51,12 @@ class DiffSingerAcousticInfer(BaseSVSInfer):
             self.vocoder = self.build_vocoder()
 
     def build_model(self, ckpt_steps=None):
+        out_dims = hparams.get('unit_dim', hparams['audio_num_mel_bins'])
+        if hparams.get('unit_dim') is not None and hparams.get('predict_volume', False):
+            out_dims += 1
         model = DiffSingerAcoustic(
             vocab_size=len(self.phoneme_dictionary),
-            out_dims=hparams['audio_num_mel_bins']
+            out_dims=out_dims
         ).eval().to(self.device)
         load_ckpt(model, hparams['work_dir'], ckpt_steps=ckpt_steps,
                   prefix_in_ckpt='model', strict=True, device=self.device)

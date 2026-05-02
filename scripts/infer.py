@@ -160,6 +160,15 @@ def acoustic(
     from utils.hparams import set_hparams, hparams
     set_hparams()
 
+    is_unit_frontend = hparams.get('task_cls') == 'training.unit_acoustic_task.UnitAcousticTask'
+    if is_unit_frontend and 'unit_frontend_infer_aux' not in hparams:
+        hparams['unit_frontend_infer_aux'] = True
+    if is_unit_frontend and not mel:
+        raise click.ClickException(
+            'Unit acoustic frontend outputs ContentVec units, not mel. '
+            'Run with --mel, then render with scripts/vocode_units.py.'
+        )
+
     # Check for vocoder path
     assert mel or (root_dir / hparams['vocoder_ckpt']).exists(), \
         f'Vocoder ckpt \'{hparams["vocoder_ckpt"]}\' not found. ' \
@@ -182,11 +191,18 @@ def acoustic(
         hparams['time_scale_factor'] = hparams['timesteps']
 
     if depth is not None:
+        if is_unit_frontend and hparams.get('unit_frontend_infer_aux', False):
+            hparams['unit_frontend_infer_aux'] = False
+            print('| unit frontend: disable aux-only output because --depth was specified')
         assert depth <= 1 - hparams['T_start'], (
             f"Depth should not be larger than 1 - T_start ({1 - hparams['T_start']})"
         )
         hparams['K_step_infer'] = round(hparams['timesteps'] * depth)
         hparams['T_start_infer'] = 1 - depth
+    elif is_unit_frontend and hparams.get('unit_frontend_infer_aux', False):
+        hparams['T_start_infer'] = 1.0
+        hparams['K_step_infer'] = 0
+        print('| unit frontend: use auxiliary decoder output')
     if steps is not None:
         if hparams['use_shallow_diffusion']:
             step_size = (1 - hparams['T_start_infer']) / steps

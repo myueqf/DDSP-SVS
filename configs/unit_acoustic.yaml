@@ -1,0 +1,35 @@
+base_config:
+  - configs/acoustic.yaml
+
+task_cls: training.unit_acoustic_task.UnitAcousticTask
+binarizer_cls: preprocessing.unit_binarizer.UnitAcousticBinarizer
+
+# DDSP-SVC repository used only for ContentVec/volume extraction in this prototype.
+ddsp_svc_path: ../DDSP-SVC
+contentvec_args:
+  encoder: contentvec768l12tta2x
+  encoder_sample_rate: 16000
+  encoder_hop_size: 160
+  encoder_out_channels: 768
+  encoder_ckpt: pretrain/contentvec/checkpoint_best_legacy_500.pt
+
+unit_dim: 768
+predict_volume: true
+unit_frontend_infer_aux: true
+
+# Prototype normalization for ContentVec-like continuous units.
+# Replace these with dataset statistics once the pipeline is proven.
+spec_min: [-5]
+spec_max: [5]
+
+# Validation audio is disabled because model outputs units, not mel.
+val_with_vocoder: false
+
+# Anti-over-smoothing terms for the auxiliary shallow decoder target.
+lambda_aux_unit_cosine: 0.1
+lambda_aux_unit_delta: 0.1
+
+# Keep DDSP-SVC-compatible frame settings.
+audio_sample_rate: 44100
+hop_size: 512
+volume_smooth_size: 1024

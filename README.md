@@ -1,76 +1,160 @@
-# DiffSinger (OpenVPI maintained version)
+# DDSP-SVS
 
-[![arXiv](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2105.02446)
-[![downloads](https://img.shields.io/github/downloads/openvpi/DiffSinger/total.svg)](https://github.com/openvpi/DiffSinger/releases)
-[![Bilibili](https://img.shields.io/badge/Bilibili-Demo-blue)](https://www.bilibili.com/video/BV1be411N7JA/)
-[![license](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/openvpi/DiffSinger/blob/main/LICENSE)
+DDSP-SVS is an experimental singing voice synthesis frontend based on
+[DiffSinger](https://github.com/openvpi/DiffSinger). Instead of predicting mel
+spectrograms directly, it predicts ContentVec units and renders audio with a
+DDSP-SVC backend.
 
-This is a refactored and enhanced version of _DiffSinger: Singing Voice Synthesis via Shallow Diffusion Mechanism_ based on the original [paper](https://arxiv.org/abs/2105.02446) and [implementation](https://github.com/MoonInTheRiver/DiffSinger), which provides:
+The current recommended pipeline is:
 
-- Cleaner code structure: useless and redundant files are removed and the others are re-organized.
-- Better sound quality: the sampling rate of synthesized audio are adapted to 44.1 kHz instead of the original 24 kHz.
-- Higher fidelity: improved acoustic models and diffusion sampling acceleration algorithms are integrated.
-- More controllability: introduced variance models and parameters for prediction and control of pitch, energy, breathiness, etc.
-- Production compatibility: functionalities are designed to match the requirements of production deployment and the SVS communities.
+```text
+lyrics / phonemes / notes / durations / f0
+  -> DiffSinger unit frontend
+  -> ContentVec units (+ volume)
+  -> DDSP-SVC backend
+  -> waveform
+```
 
-|                                       Overview                                        |                                    Variance Model                                     |                                    Acoustic Model                                     |
-|:-------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------:|
-| <img src="docs/resources/arch-overview.jpg" alt="arch-overview" style="zoom: 60%;" /> | <img src="docs/resources/arch-variance.jpg" alt="arch-variance" style="zoom: 50%;" /> | <img src="docs/resources/arch-acoustic.jpg" alt="arch-acoustic" style="zoom: 60%;" /> |
+The variance model and most of the DiffSinger data pipeline are kept. The unit
+frontend is intended to replace the acoustic feature extractor part, while the
+DDSP-SVC model stays as the backend renderer.
 
-## User Guidance
+## Status
 
-> 中文教程 / Chinese Tutorials: [Text](https://openvpi-docs.feishu.cn/wiki/KmBFwoYDEixrS4kHcTAcajPinPe), [Video](https://space.bilibili.com/179281251/channel/collectiondetail?sid=1747910)
+This project is experimental. The currently tested path is the auxiliary-decoder
+unit frontend with DDSP-SVC as a frozen backend. Shallow diffusion / reflow on
+units is not the default inference path.
 
-- **Installation & basic usages**: See [Getting Started](docs/GettingStarted.md)
-- **Dataset creation pipelines & tools**: See [MakeDiffSinger](https://github.com/openvpi/MakeDiffSinger)
-- **Best practices & tutorials**: See [Best Practices](docs/BestPractices.md)
-- **Editing configurations**: See [Configuration Schemas](docs/ConfigurationSchemas.md)
-- **Deployment & production**: [OpenUTAU](https://github.com/stakira/OpenUtau), [DiffScope (under development)](https://github.com/diffscope/diffscope-project)
-- **Communication groups**: [QQ Group](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=fibG_dxuPW5maUJwe9_ya5-zFcIwaoOR&authKey=ZgLCG5EqQVUGCID1nfKei8tCnlQHAmD9koxebFXv5WfUchhLwWxb52o1pimNai5A&noverify=0&group_code=907879266) (907879266), [Discord server](https://discord.gg/wwbu2JUMjj)
+## Setup
 
-## Progress & Roadmap
+Install dependencies:
 
-- **Progress since we forked into this repository**: See [Releases](https://github.com/openvpi/DiffSinger/releases)
-- **Roadmap for future releases**: See [Project Board](https://github.com/orgs/openvpi/projects/1)
-- **Thoughts, proposals & ideas**: See [Discussions](https://github.com/openvpi/DiffSinger/discussions)
+```bash
+# Install PyTorch and torchaudio for your CUDA version first.
+# See https://pytorch.org/get-started/locally/
+python -m pip install pip==24.0
+pip install -r requirements.txt
+```
 
-## Architecture & Algorithms
+`fairseq==0.12.2` is used for legacy ContentVec checkpoints and is known to
+need `pip==24.0` during installation.
 
-TBD
+The backend uses `gin-config` (`import gin`). Do not install the unrelated
+`gin` package as a replacement.
 
-## Development Resources
+Prepare a DDSP-SVC repository beside this project, or pass its path explicitly:
 
-TBD
+```text
+../DDSP-SVC
+```
 
-## References
+The DDSP-SVC backend should contain its normal model config, reflow checkpoint,
+ContentVec checkpoint, and NsfHifiGAN assets.
 
-### Original Paper & Implementation
+## Binarization
 
-- Paper: [DiffSinger: Singing Voice Synthesis via Shallow Diffusion Mechanism](https://arxiv.org/abs/2105.02446)
-- Implementation: [MoonInTheRiver/DiffSinger](https://github.com/MoonInTheRiver/DiffSinger)
+Edit `configs/unit_acoustic.yaml` for your dataset paths, dictionary, and
+ContentVec checkpoint path, then run:
 
-### Generative Models & Algorithms
+```bash
+python scripts/binarize.py --config configs/unit_acoustic.yaml
+```
 
-- Denoising Diffusion Probabilistic Models (DDPM): [paper](https://arxiv.org/abs/2006.11239), [implementation](https://github.com/hojonathanho/diffusion)
-  - [DDIM](https://arxiv.org/abs/2010.02502) for diffusion sampling acceleration
-  - [PNDM](https://arxiv.org/abs/2202.09778) for diffusion sampling acceleration
-  - [DPM-Solver++](https://github.com/LuChengTHU/dpm-solver) for diffusion sampling acceleration
-  - [UniPC](https://github.com/wl-zhao/UniPC) for diffusion sampling acceleration
-- Rectified Flow (RF): [paper](https://arxiv.org/abs/2209.03003), [implementation](https://github.com/gnobitab/RectifiedFlow)
+## Training
 
-### Dependencies & Submodules
+Train the unit frontend:
 
-- [RoPE](https://github.com/lucidrains/rotary-embedding-torch) for transformer encoder
-- [HiFi-GAN](https://github.com/jik876/hifi-gan) and [NSF](https://github.com/nii-yamagishilab/project-NN-Pytorch-scripts/tree/master/project/01-nsf) for waveform reconstruction
-- [pc-ddsp](https://github.com/yxlllc/pc-ddsp) for waveform reconstruction
-- [RMVPE](https://github.com/Dream-High/RMVPE) and yxlllc's [fork](https://github.com/yxlllc/RMVPE) for pitch extraction
-- [Vocal Remover](https://github.com/tsurumeso/vocal-remover) and yxlllc's [fork](https://github.com/yxlllc/vocal-remover) for harmonic-noise separation
+```bash
+python scripts/train.py \
+  --config configs/unit_acoustic.yaml \
+  --exp_name my_unit_frontend \
+  --reset
+```
 
-## Disclaimer
+Checkpoints are saved in:
 
-Any organization or individual is prohibited from using any functionalities included in this repository to generate someone's speech without his/her consent, including but not limited to government leaders, political figures, and celebrities. If you do not comply with this item, you could be in violation of copyright laws.
+```text
+checkpoints/my_unit_frontend/
+```
 
-## License
+## Inference
 
-This forked DiffSinger repository is licensed under the [Apache 2.0 License](LICENSE).
+Run end-to-end inference with a DDSP-SVC backend:
 
+```bash
+python scripts/infer_ddsp_svs.py samples/example.ds \
+  --exp my_unit_frontend \
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --out outputs/example.wav \
+  --spk-id 1 \
+  --infer-step 50
+```
+
+To keep the intermediate unit payload:
+
+```bash
+python scripts/infer_ddsp_svs.py samples/example.ds \
+  --exp my_unit_frontend \
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --out outputs/example.wav \
+  --save-units
+```
+
+You can also run the two stages separately:
+
+```bash
+python scripts/infer.py acoustic samples/example.ds \
+  --exp my_unit_frontend \
+  --mel \
+  --out outputs \
+  --title example
+
+python scripts/vocode_units.py outputs/example.mel.pt \
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --out outputs/example.wav \
+  --spk-id 1 \
+  --infer-step 50
+```
+
+## Diagnostics
+
+Render ground-truth binary units through the backend:
+
+```bash
+python scripts/vocode_binary_units.py \
+  --binary-data-dir data/unit_frontend/binary \
+  --prefix valid \
+  --name ITEM_NAME \
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --out outputs/gt_item.wav
+```
+
+Compare predicted units against binary ground truth:
+
+```bash
+python scripts/predict_binary_units.py \
+  --exp my_unit_frontend \
+  --binary-data-dir data/unit_frontend/binary \
+  --prefix valid \
+  --name ITEM_NAME \
+  --out outputs/pred_item.units.pt
+
+python scripts/analyze_units.py \
+  --pred outputs/pred_item.units.pt \
+  --binary-data-dir data/unit_frontend/binary \
+  --prefix valid \
+  --name ITEM_NAME
+```
+
+## Notes
+
+More implementation notes are in
+[`docs/UnitFrontendDDSP.md`](docs/UnitFrontendDDSP.md).
+
+This repository is a fork of DiffSinger and keeps the original Apache 2.0
+license. Please also follow the license and model usage terms of the DDSP-SVC
+backend and any pretrained checkpoints you use.
