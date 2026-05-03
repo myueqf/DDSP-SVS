@@ -34,6 +34,13 @@ class DiffSingerAcousticExporter(BaseExporter):
         self.lang_map: dict = self.build_lang_map()
         self.phoneme_dictionary = load_phoneme_dictionary()
         self.use_lang_id = hparams.get('use_lang_id', False) and len(self.phoneme_dictionary.cross_lingual_phonemes) > 0
+        self.is_unit_frontend = hparams.get('task_cls') == 'training.unit_acoustic_task.UnitAcousticTask'
+        self.unit_frontend_aux_only = (
+            self.is_unit_frontend
+            and hparams.get('unit_frontend_infer_aux', True)
+            and hparams.get('use_shallow_diffusion', False)
+        )
+        self.out_dims = self._model_out_dims()
         self.model = self.build_model()
         self.fs2_aux_cache_path = self.cache_dir / (
             'fs2_aux.onnx' if self.model.use_shallow_diffusion else 'fs2.onnx'
@@ -82,7 +89,7 @@ class DiffSingerAcousticExporter(BaseExporter):
     def build_model(self) -> DiffSingerAcousticONNX:
         model = DiffSingerAcousticONNX(
             vocab_size=len(self.phoneme_dictionary),
-            out_dims=hparams['audio_num_mel_bins'],
+            out_dims=self.out_dims,
             cross_lingual_token_idx=sorted({
                 self.phoneme_dictionary.encode_one(p)
                 for p in self.phoneme_dictionary.cross_lingual_phonemes
@@ -103,6 +110,13 @@ class DiffSingerAcousticExporter(BaseExporter):
     def export_model(self, path: Path):
         self._torch_export_model()
         fs2_aux_onnx = self._optimize_fs2_aux_graph(onnx.load(self.fs2_aux_cache_path))
+        if self.unit_frontend_aux_only:
+            model_onnx = self._optimize_unit_frontend_graph(fs2_aux_onnx)
+            onnx.save(model_onnx, path)
+            self.fs2_aux_cache_path.unlink()
+            print(f'| export model => {path}')
+            return
+
         diffusion_onnx = self._optimize_diffusion_graph(onnx.load(self.diffusion_cache_path))
         model_onnx = self._merge_fs2_aux_diffusion_graphs(fs2_aux_onnx, diffusion_onnx)
         onnx.save(model_onnx, path)
@@ -129,8 +143,19 @@ class DiffSingerAcousticExporter(BaseExporter):
             'use_lang_id': self.use_lang_id,
             'acoustic': f'{model_name}.onnx',
             'hidden_size': hparams['hidden_size'],
-            'vocoder': 'pc_nsf_hifigan_44.1k_hop512_128bin_2025.02',
         }
+        if self.is_unit_frontend:
+            dsconfig.update({
+                'acoustic_type': 'ddsp_svs',
+                'ddsp_svs': {
+                    'model_root': 'ddspmodel/onnx',
+                    'dependencies_root': 'ddspmodel/onnx',
+                    'reflow_steps': 50,
+                    'unit_dim': hparams.get('unit_dim', 768),
+                }
+            })
+        else:
+            dsconfig['vocoder'] = 'pc_nsf_hifigan_44.1k_hop512_128bin_2025.02'
         # multi-speaker
         if len(self.export_spk) > 0:
             dsconfig['speakers'] = [f'{self.model_name}.{spk[0]}' for spk in self.export_spk]
@@ -147,7 +172,7 @@ class DiffSingerAcousticExporter(BaseExporter):
             dsconfig[f'use_{variance}_embed'] = (variance in self.model.fs2.variance_embed_list)
         # sampling acceleration and shallow diffusion
         dsconfig['use_continuous_acceleration'] = True
-        dsconfig['use_variable_depth'] = self.model.use_shallow_diffusion
+        dsconfig['use_variable_depth'] = self.model.use_shallow_diffusion and not self.unit_frontend_aux_only
         dsconfig['max_depth'] = 1 - self.model.diffusion.t_start
         # mel specification
         dsconfig['sample_rate'] = hparams['audio_sample_rate']
@@ -231,8 +256,9 @@ class DiffSingerAcousticExporter(BaseExporter):
         # PyTorch ONNX export for FastSpeech2 and aux decoder
         output_names = ['condition']
         if self.model.use_shallow_diffusion:
-            output_names.append('aux_mel')
-            dynamix_axes['aux_mel'] = {
+            aux_output_name = 'units' if self.is_unit_frontend else 'aux_mel'
+            output_names.append(aux_output_name)
+            dynamix_axes[aux_output_name] = {
                 1: 'n_frames'
             }
         print(f'Exporting {self.fs2_aux_class_name}...')
@@ -249,9 +275,12 @@ class DiffSingerAcousticExporter(BaseExporter):
         condition = torch.rand((1, n_frames, hparams['hidden_size']), device=self.device)
 
         # Prepare inputs for backbone tracing and GaussianDiffusion scripting
-        shape = (1, 1, hparams['audio_num_mel_bins'], n_frames)
+        if self.unit_frontend_aux_only:
+            return
+
+        shape = (1, 1, self.out_dims, n_frames)
         noise = torch.randn(shape, device=self.device)
-        x_aux = torch.randn((1, n_frames, hparams['audio_num_mel_bins']), device=self.device)
+        x_aux = torch.randn((1, n_frames, self.out_dims), device=self.device)
         dummy_time = (torch.rand((1,), device=self.device) * self.model.diffusion.time_scale_factor).float()
         dummy_depth = torch.tensor(0.1, device=self.device)
         dummy_steps = 5
@@ -343,6 +372,11 @@ class DiffSingerAcousticExporter(BaseExporter):
         )  # => [1, 1, H]
         return spk_mix_embed
 
+    def _model_out_dims(self) -> int:
+        if self.is_unit_frontend:
+            return hparams['unit_dim'] + (1 if hparams.get('predict_volume', False) else 0)
+        return hparams['audio_num_mel_bins']
+
     def _optimize_fs2_aux_graph(self, fs2: onnx.ModelProto) -> onnx.ModelProto:
         print(f'Running ONNX Simplifier on {self.fs2_aux_class_name}...')
         fs2, check = onnxsim.simplify(fs2, include_subgraph=True)
@@ -354,9 +388,23 @@ class DiffSingerAcousticExporter(BaseExporter):
         print(f'| optimize graph: {self.fs2_aux_class_name}')
         return fs2
 
+    def _optimize_unit_frontend_graph(self, fs2: onnx.ModelProto) -> onnx.ModelProto:
+        output_name = 'units' if any(o.name == 'units' for o in fs2.graph.output) else 'aux_mel'
+        outputs = [o for o in fs2.graph.output if o.name == output_name]
+        del fs2.graph.output[:]
+        fs2.graph.output.extend(outputs)
+        onnx_helper.model_override_io_shapes(fs2, output_shapes={
+            output_name: (1, 'n_frames', self.out_dims)
+        })
+        print(f'Running ONNX Simplifier on {self.model_class_name} aux-only unit frontend...')
+        fs2, check = onnxsim.simplify(fs2, include_subgraph=True)
+        assert check, 'Simplified ONNX model could not be validated'
+        print(f'| optimize graph: {self.model_class_name} aux-only unit frontend')
+        return fs2
+
     def _optimize_diffusion_graph(self, diffusion: onnx.ModelProto) -> onnx.ModelProto:
         onnx_helper.model_override_io_shapes(diffusion, output_shapes={
-            'mel': (1, 'n_frames', hparams['audio_num_mel_bins'])
+            'mel': (1, 'n_frames', self.out_dims)
         })
         print(f'Running ONNX Simplifier #1 on {self.diffusion_class_name}...')
         diffusion, check = onnxsim.simplify(diffusion, include_subgraph=True)
