@@ -82,7 +82,7 @@ checkpoints/my_unit_frontend/
 Run end-to-end inference with a DDSP-SVC backend:
 
 ```bash
-python scripts/infer_ddsp_svs.py samples/example.ds \
+python scripts/infer.py acoustic samples/example.ds \
   --exp my_unit_frontend \
   --ddsp-svc ../DDSP-SVC \
   --model checkpoints/ddspmodel/model_1600.pt \
@@ -94,7 +94,7 @@ python scripts/infer_ddsp_svs.py samples/example.ds \
 To keep the intermediate unit payload:
 
 ```bash
-python scripts/infer_ddsp_svs.py samples/example.ds \
+python scripts/infer.py acoustic samples/example.ds \
   --exp my_unit_frontend \
   --ddsp-svc ../DDSP-SVC \
   --model checkpoints/ddspmodel/model_1600.pt \
@@ -107,11 +107,12 @@ You can also run the two stages separately:
 ```bash
 python scripts/infer.py acoustic samples/example.ds \
   --exp my_unit_frontend \
-  --mel \
-  --out outputs \
-  --title example
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --out outputs/example.wav \
+  --save-units
 
-python scripts/vocode_units.py outputs/example.units.pt \
+python scripts/debug/vocode_units.py outputs/example.units.pt \
   --ddsp-svc ../DDSP-SVC \
   --model checkpoints/ddspmodel/model_1600.pt \
   --out outputs/example.wav \
@@ -124,7 +125,7 @@ python scripts/vocode_units.py outputs/example.units.pt \
 Render ground-truth binary units through the backend:
 
 ```bash
-python scripts/vocode_binary_units.py \
+python scripts/debug/vocode_binary_units.py \
   --binary-data-dir data/unit_frontend/binary \
   --prefix valid \
   --name ITEM_NAME \
@@ -136,14 +137,14 @@ python scripts/vocode_binary_units.py \
 Compare predicted units against binary ground truth:
 
 ```bash
-python scripts/predict_binary_units.py \
+python scripts/debug/predict_binary_units.py \
   --exp my_unit_frontend \
   --binary-data-dir data/unit_frontend/binary \
   --prefix valid \
   --name ITEM_NAME \
   --out outputs/pred_item.units.pt
 
-python scripts/analyze_units.py \
+python scripts/debug/analyze_units.py \
   --pred outputs/pred_item.units.pt \
   --binary-data-dir data/unit_frontend/binary \
   --prefix valid \

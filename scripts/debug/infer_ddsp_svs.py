@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import tqdm
 
-root_dir = pathlib.Path(__file__).resolve().parent.parent
+root_dir = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root_dir))
 
 from modules.ddsp_svc_backend import load_backend, save_rendered_payload

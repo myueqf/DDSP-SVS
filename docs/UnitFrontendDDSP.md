@@ -41,19 +41,19 @@ frontend model without deeply rewriting DiffSinger.
 - `configs/unit_acoustic_p40.yaml`
   - Smaller P40-friendly configuration for architecture validation.
 
-- `scripts/vocode_units.py`
+- `scripts/debug/vocode_units.py`
   - Sends predicted units through the DDSP-SVC backend.
 
-- `scripts/vocode_binary_units.py`
+- `scripts/debug/vocode_binary_units.py`
   - Sends ground-truth binary units through the DDSP-SVC backend.
   - Used to verify that the backend side is wired correctly.
 
-- `scripts/analyze_units.py`
+- `scripts/debug/analyze_units.py`
   - Compares predicted units against ground-truth binary units.
   - Reports unit statistics, frame cosine, L1/L2, delta statistics, volume
     statistics, and f0 statistics.
 
-- `scripts/predict_binary_units.py`
+- `scripts/debug/predict_binary_units.py`
   - Runs a trained unit acoustic checkpoint on one binary item.
   - Saves a `.units.pt`-compatible payload for analysis or DDSP-SVC vocoding.
 
@@ -62,7 +62,7 @@ frontend model without deeply rewriting DiffSinger.
 The DDSP-SVC backend was first tested with ground-truth binary units:
 
 ```bash
-python scripts/vocode_binary_units.py \
+python scripts/debug/vocode_binary_units.py \
   --binary-data-dir data/unit_frontend/binary \
   --prefix valid \
   --name 2001000001 \
@@ -77,23 +77,18 @@ Result: the output had clear voice and intelligible semantics. This means the
 DDSP-SVC backend, HifiGAN path, f0, volume, and speaker id wiring are basically
 correct.
 
-Then the trained frontend checkpoint was tested with normal DiffSinger acoustic
+Then the trained frontend checkpoint was tested with DDSP-SVS acoustic
 inference using auxiliary output only:
 
 ```bash
 python scripts/infer.py acoustic samples/123.ds \
   --exp 123 \
-  --mel \
-  --out outputs \
-  --title step10k_aux \
-  --depth 0
-
-python scripts/vocode_units.py outputs/step10k_aux.units.pt \
   --ddsp-svc ../DDSP-SVC \
   --model /root/DiffSinger/checkpoints/ddspmodel/model_1600.pt \
   --out outputs/step10k_aux.wav \
   --spk-id 1 \
-  --infer-step 20
+  --infer-step 20 \
+  --save-units
 ```
 
 Result: the output was normal and reached usable DiffSinger-like quality.
@@ -104,11 +99,11 @@ This is the strongest current evidence that the main architecture works:
 DiffSinger encoder + auxiliary decoder -> ContentVec units -> DDSP-SVC backend
 ```
 
-The two-stage command is still useful for debugging, but normal usage can be
-run through the unified script:
+The two-stage debug tools are still useful for inspecting saved units, but
+normal usage should go through the unified acoustic command:
 
 ```bash
-python scripts/infer_ddsp_svs.py samples/123.ds \
+python scripts/infer.py acoustic samples/123.ds \
   --exp 123 \
   --ddsp-svc ../DDSP-SVC \
   --model /root/DiffSinger/checkpoints/ddspmodel/model_1600.pt \
@@ -126,7 +121,7 @@ The poor result from the earlier `step10k` output was not caused by the frontend
 failing to learn semantics. It was caused by the shallow diffusion / reflow stage
 being unsuitable for the current unit target and inference settings.
 
-For a matched validation item at 10k steps, `scripts/analyze_units.py` reported:
+For a matched validation item at 10k steps, `scripts/debug/analyze_units.py` reported:
 
 ```text
 cosine(frame): mean=0.589678, median=0.609473
@@ -189,21 +184,19 @@ frozen_params:
   - model.diffusion
 ```
 
-Normal unit frontend inference now defaults to auxiliary decoder output. The
-explicit `--depth 0` form is still useful for older checkpoints or older code:
+Normal unit frontend inference now defaults to auxiliary decoder output:
 
 ```bash
 python scripts/infer.py acoustic samples/123.ds \
   --exp 123 \
-  --mel \
-  --out outputs \
-  --title my_unit_frontend \
-  --depth 0
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --out outputs/my_unit_frontend.wav \
+  --save-units
 ```
 
-`scripts/infer.py acoustic` intentionally requires `--mel` for unit frontends.
-The saved `.units.pt` file contains units, not real mel-spectrograms, and should
-be rendered with `scripts/vocode_units.py`.
+The saved `.units.pt` file contains units, not real mel-spectrograms. It can be
+re-rendered or inspected with tools under `scripts/debug/`.
 
 If diffusion / reflow is tested again later, pass `--depth` explicitly. This
 disables `unit_frontend_infer_aux` for that run. It should be a very light
@@ -240,20 +233,20 @@ But this should be treated as optional follow-up work, not the default path.
 1. Verify backend first with ground-truth binary units:
 
    ```bash
-   python scripts/vocode_binary_units.py ...
+   python scripts/debug/vocode_binary_units.py ...
    ```
 
 2. Verify the frontend on a known binary item:
 
    ```bash
-   python scripts/predict_binary_units.py ...
-   python scripts/analyze_units.py ...
+   python scripts/debug/predict_binary_units.py ...
+   python scripts/debug/analyze_units.py ...
    ```
 
 3. For normal DS inference, prefer auxiliary-only output:
 
    ```bash
-   python scripts/infer_ddsp_svs.py ...
+   python scripts/debug/infer_ddsp_svs.py ...
    ```
 
 4. If output is intelligible with `--depth 0` but bad without it, the problem is

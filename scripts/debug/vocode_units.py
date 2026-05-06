@@ -4,7 +4,7 @@ import sys
 
 import torch
 
-root_dir = pathlib.Path(__file__).resolve().parent.parent
+root_dir = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root_dir))
 
 from modules.ddsp_svc_backend import load_backend, save_rendered_payload
@@ -14,7 +14,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description='Run a DDSP-SVC backend from DiffSinger unit frontend output.'
     )
-    parser.add_argument('input', type=pathlib.Path, help='Path to .units.pt saved by scripts/infer.py acoustic --mel')
+    parser.add_argument('input', type=pathlib.Path, help='Path to .units.pt saved by scripts/infer.py acoustic --save-units')
     parser.add_argument('--ddsp-svc', type=pathlib.Path, default=pathlib.Path('../DDSP-SVC'),
                         help='Path to DDSP-SVC repository')
     parser.add_argument('--model', type=pathlib.Path, required=True,
@@ -46,7 +46,7 @@ def main():
     device = cmd.device or ('cuda' if torch.cuda.is_available() else 'cpu')
     payload = torch.load(cmd.input, map_location='cpu', weights_only=False)
     if not isinstance(payload, list):
-        raise ValueError('Expected a list saved by scripts/infer.py acoustic --mel.')
+        raise ValueError('Expected a list saved by scripts/infer.py acoustic --save-units.')
 
     model, vocoder, args = load_backend(
         cmd.ddsp_svc, cmd.model, device=device, vocoder_ckpt=cmd.vocoder_ckpt

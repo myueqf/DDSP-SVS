@@ -4,6 +4,7 @@ import pathlib
 import sys
 from collections import OrderedDict
 from pathlib import Path
+from types import SimpleNamespace
 
 import click
 from typing import Tuple
@@ -37,7 +38,7 @@ def main():
     pass
 
 
-@main.command(help='Run DiffSinger acoustic model inference')
+@main.command(help='Run DDSP-SVS acoustic frontend and DDSP-SVC backend inference')
 @click.argument(
     'proj', type=click.Path(
         exists=True, file_okay=True, dir_okay=False, readable=True,
@@ -52,9 +53,29 @@ def main():
     help='Selection of model'
 )
 @click.option(
+    '--config', type=click.Path(file_okay=True, dir_okay=False),
+    required=False,
+    help='Config file used by the frontend experiment'
+)
+@click.option(
     '--ckpt', type=click.IntRange(min=0),
     required=False, metavar='STEPS',
     help='Selection of checkpoint training steps'
+)
+@click.option(
+    '--ddsp-svc', type=click.Path(file_okay=False, dir_okay=True, path_type=pathlib.Path),
+    required=False, default=pathlib.Path('../DDSP-SVC'),
+    help='Path to DDSP-SVC repository'
+)
+@click.option(
+    '--model', type=click.Path(file_okay=True, dir_okay=False, path_type=pathlib.Path),
+    required=True,
+    help='Path to DDSP-SVC reflow checkpoint'
+)
+@click.option(
+    '--vocoder-ckpt', type=click.Path(file_okay=True, dir_okay=False, path_type=pathlib.Path),
+    required=False,
+    help='Override DDSP-SVC vocoder checkpoint path'
 )
 @click.option(
     '--spk', type=click.STRING,
@@ -68,10 +89,10 @@ def main():
 )
 @click.option(
     '--out', type=click.Path(
-        file_okay=False, dir_okay=True, path_type=pathlib.Path
+        file_okay=True, dir_okay=True, path_type=pathlib.Path
     ),
     required=False,
-    help='Path of the output folder'
+    help='Output wav path or output folder'
 )
 @click.option(
     '--title', type=click.STRING,
@@ -106,16 +127,75 @@ def main():
 @click.option(
     '--steps', type=click.IntRange(min=1),
     required=False,
-    help='Diffusion sampling steps'
+    help='Frontend diffusion sampling steps'
 )
 @click.option(
-    '--mel', is_flag=True,
-    help='Save intermediate acoustic tensor instead of waveform; unit frontends save .units.pt'
+    '--save-units', is_flag=True,
+    help='Save intermediate unit payload'
+)
+@click.option(
+    '--units-out', type=click.Path(file_okay=True, dir_okay=False, path_type=pathlib.Path),
+    required=False,
+    help='Intermediate unit payload path; implies --save-units'
+)
+@click.option(
+    '--unit-dim', type=click.IntRange(min=1),
+    required=False, default=768,
+    help='Number of ContentVec unit channels'
+)
+@click.option(
+    '--spk-id', type=click.INT,
+    required=False, default=1,
+    help='DDSP-SVC speaker id, 1-based'
+)
+@click.option(
+    '--spk-mix-dict', type=click.STRING,
+    required=False, default='None',
+    help='DDSP-SVC speaker mix dict, e.g. "{1:0.5,2:0.5}"'
+)
+@click.option(
+    '--backend-key', type=click.FLOAT,
+    required=False, default=0.0,
+    help='DDSP-SVC backend pitch shift in semitones'
+)
+@click.option(
+    '--formant-shift-key', type=click.FLOAT,
+    required=False, default=0.0,
+    help='DDSP-SVC aug_shift/formant key'
+)
+@click.option(
+    '--infer-step', type=click.INT,
+    required=False, default=-1,
+    help='DDSP-SVC backend reflow steps; -1 uses backend config'
+)
+@click.option(
+    '--method', type=click.Choice(['auto', 'euler', 'rk4']),
+    required=False, default='auto',
+    help='DDSP-SVC backend sampling method'
+)
+@click.option(
+    '--t-start', type=click.FLOAT,
+    required=False,
+    help='DDSP-SVC backend reflow t_start; default uses backend config or 0'
+)
+@click.option(
+    '--volume-default', type=click.FLOAT,
+    required=False, default=0.1,
+    help='Fallback volume if frontend tensor has no volume channel'
+)
+@click.option(
+    '--device', type=click.STRING,
+    required=False,
+    help='cpu/cuda; default auto'
 )
 def acoustic(
         proj: pathlib.Path,
         exp: str,
+        config: str,
         ckpt: int,
+        ddsp_svc: pathlib.Path,
+        model: pathlib.Path,
+        vocoder_ckpt: pathlib.Path,
         spk: str,
         lang: str,
         out: pathlib.Path,
@@ -126,11 +206,27 @@ def acoustic(
         seed: int,
         depth: float,
         steps: int,
-        mel: bool
+        save_units: bool,
+        units_out: pathlib.Path,
+        unit_dim: int,
+        spk_id: int,
+        spk_mix_dict: str,
+        backend_key: float,
+        formant_shift_key: float,
+        infer_step: int,
+        method: str,
+        t_start: float,
+        volume_default: float,
+        device: str
 ):
     name = proj.stem if not title else title
     if out is None:
-        out = proj.parent
+        wav_path = proj.with_name(name + '.wav')
+    elif out.suffix.lower() == '.wav':
+        wav_path = out
+    else:
+        wav_path = out / f'{name}.wav'
+    units_path = units_out or wav_path.with_suffix('.units.pt')
 
     with open(proj, 'r', encoding='utf-8') as f:
         params = json.load(f)
@@ -157,22 +253,16 @@ def acoustic(
         exp,
         '--infer'
     ]
+    if config:
+        sys.argv.extend(['--config', config])
     from utils.hparams import set_hparams, hparams
     set_hparams()
 
     is_unit_frontend = hparams.get('task_cls') == 'training.unit_acoustic_task.UnitAcousticTask'
+    if not is_unit_frontend:
+        raise click.ClickException('DDSP-SVS acoustic inference requires a UnitAcousticTask checkpoint.')
     if is_unit_frontend and 'unit_frontend_infer_aux' not in hparams:
         hparams['unit_frontend_infer_aux'] = True
-    if is_unit_frontend and not mel:
-        raise click.ClickException(
-            'Unit acoustic frontend outputs ContentVec units, not mel. '
-            'Run with --mel, then render with scripts/vocode_units.py.'
-        )
-
-    # Check for vocoder path
-    assert mel or (root_dir / hparams['vocoder_ckpt']).exists(), \
-        f'Vocoder ckpt \'{hparams["vocoder_ckpt"]}\' not found. ' \
-        f'Please put it to the checkpoints directory to run inference.'
 
     # For compatibility:
     # migrate timesteps, K_step, K_step_infer, diff_speedup to time_scale_factor, T_start, T_start_infer, sampling_steps
@@ -191,15 +281,14 @@ def acoustic(
         hparams['time_scale_factor'] = hparams['timesteps']
 
     if depth is not None:
-        if is_unit_frontend and hparams.get('unit_frontend_infer_aux', False):
-            hparams['unit_frontend_infer_aux'] = False
-            print('| unit frontend: disable aux-only output because --depth was specified')
+        hparams['unit_frontend_infer_aux'] = False
+        print('| unit frontend: use shallow diffusion because --depth was specified')
         assert depth <= 1 - hparams['T_start'], (
             f"Depth should not be larger than 1 - T_start ({1 - hparams['T_start']})"
         )
         hparams['K_step_infer'] = round(hparams['timesteps'] * depth)
         hparams['T_start_infer'] = 1 - depth
-    elif is_unit_frontend and hparams.get('unit_frontend_infer_aux', False):
+    elif hparams.get('unit_frontend_infer_aux', False):
         hparams['T_start_infer'] = 1.0
         hparams['K_step_infer'] = 0
         print('| unit frontend: use auxiliary decoder output')
@@ -222,15 +311,64 @@ def acoustic(
         if lang is not None:
             param['lang'] = lang
 
+    import torch
+    import tqdm
     from inference.ds_acoustic import DiffSingerAcousticInfer
-    infer_ins = DiffSingerAcousticInfer(load_vocoder=not mel, ckpt_steps=ckpt)
+    from modules.ddsp_svc_backend import load_backend, save_rendered_payload
+
+    device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+    infer_ins = DiffSingerAcousticInfer(device=device, load_vocoder=False, ckpt_steps=ckpt)
     print(f'| Model: {type(infer_ins.model)}')
 
+    backend_model, backend_vocoder, backend_args = load_backend(
+        ddsp_svc, model, device=device, vocoder_ckpt=vocoder_ckpt
+    )
+    backend_options = SimpleNamespace(
+        unit_dim=unit_dim,
+        volume_default=volume_default,
+        backend_key=backend_key,
+        spk_mix_dict=spk_mix_dict,
+        spk_id=spk_id,
+        formant_shift_key=formant_shift_key,
+        infer_step=infer_step,
+        method=method,
+        t_start=t_start,
+    )
+
     try:
-        infer_ins.run_inference(
-            params, out_dir=out, title=name, num_runs=num,
-            spk_mix=spk_mix, seed=seed, save_mel=mel
-        )
+        batches = [infer_ins.preprocess_input(param, idx=i) for i, param in enumerate(params)]
+        for i in range(num):
+            if num > 1:
+                run_wav_path = wav_path.with_name(f'{wav_path.stem}-{str(i).zfill(3)}{wav_path.suffix}')
+                run_units_path = units_path.with_name(f'{units_path.stem}-{str(i).zfill(3)}{units_path.suffix}')
+            else:
+                run_wav_path = wav_path
+                run_units_path = units_path
+
+            payload = []
+            for param, batch in tqdm.tqdm(zip(params, batches), desc='frontend segments', total=len(params)):
+                if 'seed' in param:
+                    torch.manual_seed(param['seed'] & 0xffff_ffff)
+                    torch.cuda.manual_seed_all(param['seed'] & 0xffff_ffff)
+                elif seed >= 0:
+                    torch.manual_seed(seed & 0xffff_ffff)
+                    torch.cuda.manual_seed_all(seed & 0xffff_ffff)
+
+                units = infer_ins.forward_model(batch)
+                payload.append({
+                    'offset': param.get('offset', 0.0),
+                    'mel': units.cpu(),
+                    'f0': batch['f0'].cpu(),
+                })
+
+            if save_units or units_out is not None:
+                run_units_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(payload, run_units_path)
+                print(f'| save units: {run_units_path}')
+            save_rendered_payload(
+                backend_model, backend_vocoder, backend_args, payload, backend_options, device, run_wav_path
+            )
+            print(f'| save audio: {run_wav_path}')
     except KeyboardInterrupt:
         exit(-1)
 

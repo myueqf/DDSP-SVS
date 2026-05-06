@@ -5,7 +5,7 @@ import sys
 
 import torch
 
-root_dir = pathlib.Path(__file__).resolve().parent.parent
+root_dir = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root_dir))
 
 

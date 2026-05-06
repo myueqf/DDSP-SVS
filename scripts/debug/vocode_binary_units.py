@@ -5,9 +5,9 @@ import sys
 
 import torch
 
-root_dir = pathlib.Path(__file__).resolve().parent.parent
+root_dir = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root_dir))
-sys.path.insert(0, str(root_dir / 'scripts'))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from utils.indexed_datasets import IndexedDataset
 from vocode_units import load_backend, synthesize_segment

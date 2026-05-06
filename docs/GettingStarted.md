@@ -85,7 +85,10 @@ for more configurable options.
 If your model is an acoustic model, run:
 
 ```bash
-python scripts/infer.py acoustic my_song.ds --exp my_experiment
+python scripts/infer.py acoustic my_song.ds \
+  --exp my_experiment \
+  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt
 ```
 
 or run

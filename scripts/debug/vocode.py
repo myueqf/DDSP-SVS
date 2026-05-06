@@ -4,7 +4,7 @@ import os
 import pathlib
 import sys
 
-root_dir = pathlib.Path(__file__).parent.parent.resolve()
+root_dir = pathlib.Path(__file__).resolve().parents[2]
 os.environ['PYTHONPATH'] = str(root_dir)
 sys.path.insert(0, str(root_dir))
 
