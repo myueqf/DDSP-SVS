@@ -1,13 +1,15 @@
 base_config:
   - configs/base.yaml
 
-task_cls: training.acoustic_task.AcousticTask
+task_cls: training.unit_acoustic_task.UnitAcousticTask
 
 dictionaries: {}
 extra_phonemes: []
 merged_phoneme_groups: []
 datasets: []
 
+# DDSP-SVS trains a text-to-ContentVec-units frontend. Audio rendering is
+# handled by a DDSP-SVC backend during inference, so validation vocoding is off.
 vocoder: NsfHifiGAN
 vocoder_ckpt: checkpoints/pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/model.ckpt
 audio_sample_rate: 44100
@@ -35,10 +37,24 @@ augmentation_args:
     range: [0.5, 2.]
     scale: 0.75
 
-binary_data_dir: 'data/opencpop/binary'
-binarizer_cls: preprocessing.acoustic_binarizer.AcousticBinarizer
-spec_min: [-12]
-spec_max: [0]
+binary_data_dir: 'data/ddsp_svs/binary'
+binarizer_cls: preprocessing.unit_binarizer.UnitAcousticBinarizer
+ddsp_svc_path: ../DDSP-SVC
+contentvec_args:
+  encoder: contentvec768l12tta2x
+  encoder_sample_rate: 16000
+  encoder_hop_size: 160
+  encoder_out_channels: 768
+  encoder_ckpt: checkpoints/contentvec/checkpoint_best_legacy_500.pt
+
+unit_dim: 768
+predict_volume: true
+unit_frontend_infer_aux: true
+
+# Prototype normalization for ContentVec-like continuous units.
+# Replace these with dataset statistics if you have them.
+spec_min: [-5]
+spec_max: [5]
 mel_vmin: -14.
 mel_vmax: 4.
 mel_base: 'e'
@@ -51,10 +67,15 @@ use_lang_id: false
 num_lang: 1
 use_spk_id: false
 num_spk: 1
+# Extra variance controls are disabled by default. They require a matching
+# variance model and an acoustic frontend trained with the same inputs.
 use_energy_embed: false
 use_breathiness_embed: false
 use_voicing_embed: false
 use_tension_embed: false
+
+# Keep pitch/formant and speed controls out of the units frontend by default.
+# DDSP backend-side controls should handle these once implemented.
 use_key_shift_embed: false
 use_speed_embed: false
 
@@ -73,9 +94,9 @@ diff_speedup: 10
 hidden_size: 256
 backbone_type: 'lynxnet'
 backbone_args:
-  num_channels: 1024
-  num_layers: 6
-  kernel_size: 31
+  num_channels: 768
+  num_layers: 4
+  kernel_size: 21
   dropout_rate: 0.0
   strong_cond: true
 main_loss_type: l2
@@ -84,42 +105,49 @@ schedule_type: 'linear'
 
 # shallow diffusion
 use_shallow_diffusion: true
-T_start: 0.4
-T_start_infer: 0.4
+T_start: 0.85
+T_start_infer: 1.0
 K_step: 400
 K_step_infer: 400
 
 shallow_diffusion_args:
   train_aux_decoder: true
-  train_diffusion: true
+  train_diffusion: false
   val_gt_start: false
   aux_decoder_arch: convnext
   aux_decoder_args:
-    num_channels: 512
-    num_layers: 6
+    num_channels: 384
+    num_layers: 4
     kernel_size: 7
     dropout_rate: 0.1
   aux_decoder_grad: 0.1
 
 lambda_aux_mel_loss: 0.2
+lambda_aux_unit_cosine: 0.1
+lambda_aux_unit_delta: 0.1
 
 # train and eval
 num_sanity_val_steps: 1
 optimizer_args:
-  lr: 0.0006
+  optimizer_cls: torch.optim.AdamW
+  lr: 0.0004
+  beta1: 0.9
+  beta2: 0.98
+  weight_decay: 0
 lr_scheduler_args:
-  step_size: 10000
-  gamma: 0.75
-max_batch_frames: 50000
-max_batch_size: 64
+  scheduler_cls: torch.optim.lr_scheduler.StepLR
+  step_size: 8000
+  gamma: 0.8
+max_batch_frames: 24000
+max_batch_size: 12
 dataset_size_key: 'lengths'
-val_with_vocoder: true
-val_check_interval: 2000
-num_valid_plots: 10
-max_updates: 160000
-num_ckpt_keep: 5
-permanent_ckpt_start: 80000
-permanent_ckpt_interval: 20000
+val_with_vocoder: false
+val_check_interval: 1000
+num_valid_plots: 0
+max_updates: 96000
+num_ckpt_keep: 30
+permanent_ckpt_start: 20000
+permanent_ckpt_interval: 10000
 
 finetune_enabled: false
 finetune_ckpt_path: null
@@ -130,5 +158,8 @@ finetune_ignored_params:
   - model.fs2.spk_embed
 finetune_strict_shapes: true
 
-freezing_enabled: false
-frozen_params: []
+freezing_enabled: true
+frozen_params:
+  - model.diffusion
+
+volume_smooth_size: 1024

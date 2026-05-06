@@ -50,7 +50,10 @@ class UnitAcousticBinarizer(AcousticBinarizer):
         if units_encoder is None or volume_extractor is None:
             contentvec_args = hparams.get('contentvec_args', {})
             encoder = contentvec_args.get('encoder', 'contentvec768l12tta2x')
-            encoder_ckpt = contentvec_args.get('encoder_ckpt', 'pretrain/contentvec/checkpoint_best_legacy_500.pt')
+            encoder_ckpt = contentvec_args.get(
+                'encoder_ckpt',
+                'checkpoints/contentvec/checkpoint_best_legacy_500.pt'
+            )
             encoder_sample_rate = contentvec_args.get('encoder_sample_rate', 16000)
             encoder_hop_size = contentvec_args.get('encoder_hop_size', 160)
             units_encoder = UnitsEncoder(
