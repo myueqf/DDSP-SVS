@@ -1,6 +1,4 @@
-import os
 import pathlib
-import sys
 from ast import literal_eval
 
 import numpy as np
@@ -9,38 +7,22 @@ import torch
 from utils.infer_utils import cross_fade, save_wav
 
 
-def resolve_vocoder_ckpt(ddsp_svc_path, ckpt_path):
-    ckpt_path = pathlib.Path(ckpt_path)
-    if not ckpt_path.is_absolute():
-        ckpt_path = ddsp_svc_path / ckpt_path
-    if ckpt_path.exists():
-        return ckpt_path
-    ckpt_with_suffix = ckpt_path.with_name(ckpt_path.name + '.ckpt')
-    if ckpt_with_suffix.exists():
-        return ckpt_with_suffix
-    return ckpt_path
-
-
 def load_backend(ddsp_svc_path, model_path, device, vocoder_ckpt=None):
-    ddsp_svc_path = pathlib.Path(ddsp_svc_path).resolve()
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    requested_asset_root = pathlib.Path(ddsp_svc_path).resolve()
+    asset_roots = []
+    if requested_asset_root.exists():
+        asset_roots.append(requested_asset_root)
+    asset_roots.append(repo_root)
     model_path = pathlib.Path(model_path).resolve()
-    if str(ddsp_svc_path) not in sys.path:
-        sys.path.insert(0, str(ddsp_svc_path))
-    from reflow.vocoder import load_model_vocoder
+    from backend.ddsp.reflow.vocoder import load_model_vocoder
 
-    old_cwd = pathlib.Path.cwd()
-    try:
-        os.chdir(ddsp_svc_path)
-        model, vocoder, args = load_model_vocoder(str(model_path), device=device)
-    finally:
-        os.chdir(old_cwd)
-    resolved_vocoder_ckpt = resolve_vocoder_ckpt(
-        ddsp_svc_path,
-        vocoder_ckpt if vocoder_ckpt is not None else args.vocoder.ckpt
+    model, vocoder, args = load_model_vocoder(
+        str(model_path),
+        device=device,
+        asset_root=asset_roots,
+        vocoder_ckpt=vocoder_ckpt
     )
-    args.vocoder.ckpt = str(resolved_vocoder_ckpt)
-    if hasattr(vocoder, 'vocoder') and hasattr(vocoder.vocoder, 'model_path'):
-        vocoder.vocoder.model_path = str(resolved_vocoder_ckpt)
     return model, vocoder, args
 
 
