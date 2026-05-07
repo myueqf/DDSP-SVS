@@ -1,77 +1,139 @@
 # DDSP-SVS
 
-DDSP-SVS is an experimental singing voice synthesis frontend based on
-[DiffSinger](https://github.com/openvpi/DiffSinger). Instead of predicting mel
-spectrograms directly, it predicts ContentVec units and renders audio with a
-DDSP-SVC backend.
+DDSP-SVS is an experimental singing voice synthesis project based on
+[DiffSinger(openvpi)](https://github.com/openvpi/DiffSinger). It trains a DiffSinger-like
+frontend to predict ContentVec units instead of mel spectrograms, then renders
+audio with a DDSP-SVC backend.
 
-The current recommended pipeline is:
+```mermaid
+flowchart LR
+  subgraph Targets["Training targets"]
+    Wav["Training wav"] --> ContentVec["ContentVec encoder"]
+    Wav --> VolumeExt["Volume extractor"]
+    ContentVec --> UnitsGT["units target<br/>[T, 768]"]
+    VolumeExt --> VolumeGT["volume target<br/>[T, 1]"]
+    UnitsGT --> Target["target tensor<br/>units (+ volume)"]
+    VolumeGT --> Target
+    Target --> NormTarget["normalized target"]
+  end
 
-```text
-lyrics / phonemes / notes / durations / f0
-  -> DiffSinger unit frontend
-  -> ContentVec units (+ volume)
-  -> DDSP-SVC backend
-  -> waveform
+  subgraph Frontend["DDSP-SVS unit frontend"]
+    Score["lyrics / phonemes<br/>notes / durations / f0"] --> FS2["FastSpeech2 acoustic encoder"]
+    FS2 --> Cond["frame condition<br/>[T, hidden]"]
+    Cond --> Aux["aux decoder"]
+    Aux --> AuxTrain["normalized prediction<br/>training"]
+    Aux --> Pred["denormalized prediction<br/>units (+ volume)"]
+    Cond -. optional .-> UnitFlow["unit reflow<br/>not default"]
+    UnitFlow -.-> Pred
+  end
+
+  NormTarget --> Loss["aux unit losses<br/>L1 + cosine + delta"]
+  AuxTrain --> Loss
+  Target -. optional .-> FlowLoss["unit reflow loss"]
+  UnitFlow -. optional .-> FlowLoss
+
+  Pred --> Split["split units / volume"]
+  Score --> F0["score f0"]
+  Split --> DDSP["DDSP-SVC DDSP model"]
+  F0 --> DDSP
+  DDSP --> DDSPWav["DDSP waveform"]
+  DDSPWav --> MelExtract["mel extractor"]
+  MelExtract --> BackendFlow["backend reflow<br/>(if t_start < 1)"]
+  MelExtract -. no backend reflow .-> HifiGAN
+  BackendFlow --> HifiGAN["NsfHiFiGAN"]
+  F0 --> HifiGAN
+  HifiGAN --> Audio["waveform"]
 ```
 
-The variance model and most of the DiffSinger data pipeline are kept. The unit
-frontend is intended to replace the acoustic feature extractor part, while the
-DDSP-SVC model stays as the backend renderer.
+The goal is to keep the text-to-singing frontend close to DiffSinger while
+reusing DDSP-SVC models as the acoustic backend.
+
+The main code path is:
+
+- `preprocessing/unit_binarizer.py` extracts ContentVec units and volume from
+  training audio.
+- `training/unit_acoustic_task.py` trains `DiffSingerAcoustic` to predict
+  `units` plus optional `volume`.
+- `modules/toplevel.py` keeps the DiffSinger acoustic encoder and uses the aux
+  decoder as the default unit frontend output.
+- `modules/ddsp_svc_backend.py` splits predicted units and volume, then calls
+  the bundled DDSP-SVC backend renderer.
 
 ## Status
 
-This project is experimental. The currently tested path is the auxiliary-decoder
-unit frontend with DDSP-SVC as a frozen backend. Shallow diffusion / reflow on
-units is not the default inference path.
+This repository is still experimental. The currently recommended path is:
+
+- train the auxiliary-decoder unit frontend;
+- keep DDSP-SVC as a frozen backend;
+- use one-step `scripts/infer.py acoustic` inference for rendering.
+
+Shallow diffusion on units and extra variance controls are kept in the codebase,
+but they are not the default path.
 
 ## Setup
 
-Install dependencies:
+Install PyTorch and torchaudio for your CUDA version first, then install the
+Python dependencies:
 
 ```bash
-# Install PyTorch and torchaudio for your CUDA version first.
-# See https://pytorch.org/get-started/locally/
 python -m pip install pip==24.0
 pip install -r requirements.txt
 ```
 
 `fairseq==0.12.2` is used for legacy ContentVec checkpoints and is known to
-need `pip==24.0` during installation.
+require `pip==24.0` during installation.
 
-The backend uses `gin-config` (`import gin`). Do not install the unrelated
-`gin` package as a replacement.
+Prepare these assets:
 
-Prepare a DDSP-SVC repository beside this project, or pass its path explicitly:
+<details>
+<summary>Required model assets</summary>
 
 ```text
-../DDSP-SVC
+checkpoints/contentvec/checkpoint_best_legacy_500.pt
+checkpoints/nsf_hifigan/config.json
+checkpoints/nsf_hifigan/model.ckpt
 ```
 
-The DDSP-SVC backend should contain its normal model config, reflow checkpoint,
-ContentVec checkpoint, and NsfHifiGAN assets.
+For DDSP-SVC backend inference, the backend checkpoint should be paired with its
+`config.yaml` in the same directory:
 
-## Binarization
-
-Edit `configs/unit_acoustic.yaml` for your dataset paths, dictionary, and
-ContentVec checkpoint path, then run:
-
-```bash
-python scripts/binarize.py --config configs/unit_acoustic.yaml
+```text
+ddspmodel/
+  config.yaml
+  model_*.pt
 ```
+
+The DDSP-SVC inference runtime is bundled in this repository under
+`backend/ddsp`. You do not need a full DDSP-SVC checkout for normal inference.
+The `--ddsp-svc` option is kept as an optional asset root for compatibility.
+
+</details>
 
 ## Training
+
+Start from the acoustic template and edit dataset paths, dictionaries,
+validation items, and ContentVec checkpoint path:
+
+```bash
+cp configs/templates/config_acoustic.yaml configs/my_acoustic.yaml
+```
+
+Binarize the dataset:
+
+```bash
+python scripts/binarize.py --config configs/my_acoustic.yaml
+```
 
 Train the unit frontend:
 
 ```bash
 python scripts/train.py \
-  --config configs/unit_acoustic.yaml \
+  --config configs/my_acoustic.yaml \
   --exp_name my_unit_frontend \
   --reset
 ```
 
-Checkpoints are saved in:
+Checkpoints are saved to:
 
 ```text
 checkpoints/my_unit_frontend/
@@ -79,83 +141,109 @@ checkpoints/my_unit_frontend/
 
 ## Inference
 
-Run end-to-end inference with a DDSP-SVC backend:
+Run the DDSP-SVS frontend and DDSP-SVC backend in one command:
 
 ```bash
 python scripts/infer.py acoustic samples/example.ds \
   --exp my_unit_frontend \
-  --ddsp-svc ../DDSP-SVC \
   --model checkpoints/ddspmodel/model_1600.pt \
   --out outputs/example.wav \
   --spk-id 1 \
   --infer-step 50
 ```
 
-To keep the intermediate unit payload:
+<details>
+<summary>Additional inference options</summary>
+
+If your NsfHifiGAN checkpoint is not at `checkpoints/nsf_hifigan/model.ckpt`,
+pass it explicitly:
 
 ```bash
 python scripts/infer.py acoustic samples/example.ds \
   --exp my_unit_frontend \
-  --ddsp-svc ../DDSP-SVC \
+  --model checkpoints/ddspmodel/model_1600.pt \
+  --vocoder-ckpt /path/to/nsf_hifigan/model.ckpt \
+  --out outputs/example.wav
+```
+
+To save the intermediate unit payload:
+
+```bash
+python scripts/infer.py acoustic samples/example.ds \
+  --exp my_unit_frontend \
   --model checkpoints/ddspmodel/model_1600.pt \
   --out outputs/example.wav \
   --save-units
 ```
 
-You can also run the two stages separately:
+This writes a `.units.pt` file next to the output wav unless `--units-out` is
+specified.
+
+</details>
+
+<details>
+<summary>ONNX export</summary>
+
+**ONNX export**
+
+Export the DDSP-SVS unit frontend with the regular DiffSinger acoustic exporter:
 
 ```bash
-python scripts/infer.py acoustic samples/example.ds \
-  --exp my_unit_frontend \
-  --ddsp-svc ../DDSP-SVC \
-  --model checkpoints/ddspmodel/model_1600.pt \
-  --out outputs/example.wav \
-  --save-units
+python scripts/export.py acoustic --exp my_unit_frontend
+```
 
+Export a DDSP-SVC backend checkpoint to ONNX:
+
+```bash
+python scripts/export_ddsp_backend_onnx.py \
+  -m checkpoints/ddspmodel/model_1600.pt \
+  -o checkpoints/ddspmodel/onnx \
+  --skip-check
+```
+
+The backend export writes:
+
+```text
+encoder.onnx
+velocity.onnx
+svc.json
+```
+
+Remove `--skip-check` to run a small ONNXRuntime smoke check after export.
+
+</details>
+
+<details>
+<summary>Debug tools</summary>
+
+**Debug tools**
+
+Debug scripts are kept under `scripts/debug/`.
+
+Render a saved unit payload:
+
+```bash
 python scripts/debug/vocode_units.py outputs/example.units.pt \
-  --ddsp-svc ../DDSP-SVC \
   --model checkpoints/ddspmodel/model_1600.pt \
   --out outputs/example.wav \
   --spk-id 1 \
   --infer-step 50
-```
-
-## Diagnostics
-
-Render ground-truth binary units through the backend:
-
-```bash
-python scripts/debug/vocode_binary_units.py \
-  --binary-data-dir data/unit_frontend/binary \
-  --prefix valid \
-  --name ITEM_NAME \
-  --ddsp-svc ../DDSP-SVC \
-  --model checkpoints/ddspmodel/model_1600.pt \
-  --out outputs/gt_item.wav
 ```
 
 Compare predicted units against binary ground truth:
 
 ```bash
-python scripts/debug/predict_binary_units.py \
-  --exp my_unit_frontend \
-  --binary-data-dir data/unit_frontend/binary \
-  --prefix valid \
-  --name ITEM_NAME \
-  --out outputs/pred_item.units.pt
-
 python scripts/debug/analyze_units.py \
-  --pred outputs/pred_item.units.pt \
-  --binary-data-dir data/unit_frontend/binary \
+  --pred outputs/example.units.pt \
+  --binary-data-dir data/ddsp_svs/binary \
   --prefix valid \
   --name ITEM_NAME
 ```
 
-## Notes
+</details>
 
-More implementation notes are in
-[`docs/UnitFrontendDDSP.md`](docs/UnitFrontendDDSP.md).
+## License
 
-This repository is a fork of DiffSinger and keeps the original Apache 2.0
-license. Please also follow the license and model usage terms of the DDSP-SVC
-backend and any pretrained checkpoints you use.
+This repository is a fork of [openvpi/DiffSinger](https://github.com/openvpi/DiffSinger) and keeps its Apache 2.0 license.
+license. The bundled DDSP-SVC backend code and any pretrained checkpoints keep
+their original license and model usage terms.
