@@ -211,6 +211,17 @@ svc.json
 
 Remove `--skip-check` to run a small ONNXRuntime smoke check after export.
 
+> Note: This fork differs significantly from upstream DiffSinger (openvpi) in its acoustic model implementation. If you run into any issues, please open an issue in this repository instead of asking in any DiffSinger community.
+
+Alternatively use `scripts/export_compatible_onnx.py` to export OpenUtau-compatible DiffSinger ONNX models
+
+```bash
+python scripts/export_compatible_onnx.py \
+    --exp my_unit_frontend \
+    --backend-model checkpoints/ddspmodel/model_1600.pt \
+    --out artifacts/123
+```
+
 </details>
 
 <details>
