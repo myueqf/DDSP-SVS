@@ -39,7 +39,7 @@ augmentation_args:
 
 binary_data_dir: 'data/ddsp_svs/binary'
 binarizer_cls: preprocessing.unit_binarizer.UnitAcousticBinarizer
-ddsp_svc_path: ../DDSP-SVC
+ddsp_svc_path: .
 contentvec_args:
   encoder: contentvec768l12tta2x
   encoder_sample_rate: 16000
